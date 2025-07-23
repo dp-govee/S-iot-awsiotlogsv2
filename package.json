@@ -1,0 +1,28 @@
+{
+  "name": "aws-iot-core-alarm",
+  "version": "1.0.0",
+  "description": "AWS IoT Core告警通知Lambda函数",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "aws",
+    "lambda",
+    "iot",
+    "alarm",
+    "dingtalk"
+  ],
+  "author": "",
+  "license": "ISC",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "@koa/cors": "^5.0.0",
+    "axios": "^1.6.7",
+    "koa": "^3.0.0",
+    "koa-bodyparser": "^4.4.1"
+  }
+}
