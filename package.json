@@ -20,7 +20,11 @@
     "node": ">=18.0.0"
   },
   "dependencies": {
+    "@aws-sdk/client-athena": "^3.848.0",
+    "@aws-sdk/client-iot": "^3.848.0",
+    "@aws-sdk/client-s3": "^3.850.0",
     "@koa/cors": "^5.0.0",
+    "aws-sdk": "^2.1692.0",
     "axios": "^1.6.7",
     "koa": "^3.0.0",
     "koa-bodyparser": "^4.4.1"
