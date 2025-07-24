@@ -19,13 +19,7 @@ async function sendToDingTalk(message) {
         hmac.update(Buffer.from(`${timestamp}\n${Secret}`, 'utf8'));
         sign = encodeURIComponent(hmac.digest('base64'));
         const webhookUrl = `${DINGTALK_WEBHOOK}&timestamp=${timestamp}&sign=${sign}`;
-        const response = await axios.post(webhookUrl, {
-            msgtype: 'markdown',
-            markdown: {
-                title: '⚠️ AWS IoT Core 告警',
-                text: message
-            }
-        });
+        const response = await axios.post(webhookUrl, message);
         console.log('钉钉响应:', response.data);
         return response.data;
     } catch (error) {

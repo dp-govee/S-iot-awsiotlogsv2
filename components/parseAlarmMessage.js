@@ -1,4 +1,3 @@
-
 /**
  * 解析SNS消息中的CloudWatch告警信息
  * @param {Object} snsMessage - SNS消息对象
@@ -30,7 +29,13 @@ function parseAlarmMessage(snsMessage) {
             const accountId = alarmMessage.AWSAccountId;
             markdownMessage += `[查看告警详情](https://${region}.console.aws.amazon.com/cloudwatch/home?region=${region}#alarmsV2:alarm/${alarmName}?~(accountId~'${accountId}))\n\n`;
         }
-        return markdownMessage;
+        return {
+            msgtype: 'markdown',
+            markdown: {
+                title: '⚠️ AWS IoT Core 告警',
+                text: markdownMessage
+            }
+        }
     } catch (error) {
         console.error('解析告警消息失败:', error);
         // 如果解析失败，返回原始消息
@@ -38,4 +43,4 @@ function parseAlarmMessage(snsMessage) {
     }
 }
 
-export { parseAlarmMessage };
+export {parseAlarmMessage};
