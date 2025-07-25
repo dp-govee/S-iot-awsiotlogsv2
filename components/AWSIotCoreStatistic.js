@@ -38,7 +38,7 @@ async function getYesterdayStatisticsFromS3() {
         const month = yesterdayStr.split('-')[1];
 
         const key = `${year}/${month}/daily-statistic-${yesterdayStr}.json`;
-
+        console.log('执行从s3查询昨日数据key:'+key);
         const command = new GetObjectCommand({
             Bucket: S3_BUCKET,
             Key: `${S3_KEY_PREFIX}${key}`
@@ -54,9 +54,11 @@ async function getYesterdayStatisticsFromS3() {
                 chunks.push(chunk);
             }
             const data = Buffer.concat(chunks).toString('utf-8');
+            console.log('从s3查询昨日数据data:'+data);
             return JSON.parse(data);
         } else {
             const data = await response.Body.transformToString();
+            console.log('_从s3查询昨日数据data:'+data);
             return JSON.parse(data);
         }
     } catch (error) {
