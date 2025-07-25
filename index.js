@@ -2,7 +2,7 @@ import {formatMessage, gatherStatistics} from "./components/ScheduleStatistics.j
 import {sendToDingTalk} from "./components/sendDingTalk.js";
 import {parseAlarmMessage} from "./components/parseAlarmMessage.js";
 import {confirmSubscription} from "./components/confirmSnsSubscribe.js";
-import {getIoTStatistics, formatIoTStatisticsMessage} from "./components/AWSIotCoreStatistic.js";
+import {getAWSIotCoreStatistic, formatIoTStatisticsMessage} from "./components/AWSIotCoreStatistic.js";
 
 export const handler = async (event) => {
     console.log('收到事件:', JSON.stringify(event, null, 2));
@@ -20,7 +20,7 @@ export const handler = async (event) => {
                 console.log('SNS订阅确认成功');
                 return {
                     statusCode: 200,
-                    body: JSON.stringify({ message: 'SNS订阅确认成功' }),
+                    body: JSON.stringify({message: 'SNS订阅确认成功'}),
                 };
             }
             // 处理正常的通知消息
@@ -31,27 +31,24 @@ export const handler = async (event) => {
                 // 发送到钉钉
                 await sendToDingTalk(formattedMessage);
                 console.log('成功发送告警消息到钉钉');
-            }
-            else {
+            } else {
                 console.log(`未知的SNS消息类型: ${snsMessage.Type}`);
             }
-        }
-        else if (isEventFromEventBridgeScheduler(event)) {
+        } else if (isEventFromEventBridgeScheduler(event)) {
             console.log('收到EventBridge定时事件:', JSON.stringify(event));
 
             // 检查是否是IoT统计任务
             if (event.detail && event.detail.type === 'iot-statistics') {
                 console.log('执行IoT设备统计任务');
                 // 1. 获取IoT统计数据
-                const iotStatistics = await getIoTStatistics();
-                
+                const iotStatistics = await getAWSIotCoreStatistic()
                 // 2. 格式化IoT统计消息
-                const iotMessage = formatIoTStatisticsMessage(iotStatistics);
-                
+                const dingTalkMessage = formatIoTStatisticsMessage(iotStatistics);
+
                 // 3. 发送到钉钉
-                await sendToDingTalk(iotMessage);
+                await sendToDingTalk(dingTalkMessage);
                 console.log('成功发送IoT统计消息到钉钉');
-            } 
+            }
             // 默认执行设备错误统计任务
             else {
                 console.log('执行设备错误统计任务');
@@ -68,13 +65,13 @@ export const handler = async (event) => {
         }
         return {
             statusCode: 200,
-            body: JSON.stringify({ message: 'Lambda 执行成功！' }),
+            body: JSON.stringify({message: 'Lambda 执行成功！'}),
         };
     } catch (error) {
         console.error('处理消息失败:', error);
         return {
             statusCode: 500,
-            body: JSON.stringify({ message: '处理消息失败', error: error.message }),
+            body: JSON.stringify({message: '处理消息失败', error: error.message}),
         };
     }
 };
@@ -85,9 +82,9 @@ export const handler = async (event) => {
  * @returns {boolean} - 是否来自SNS
  */
 function isEventFromSNS(event) {
-    return event.Records && 
-           event.Records.length > 0 && 
-           event.Records[0].EventSource === 'aws:sns';
+    return event.Records &&
+        event.Records.length > 0 &&
+        event.Records[0].EventSource === 'aws:sns';
 }
 
 /**

@@ -1,30 +1,50 @@
-import { IoTClient, ListThingsCommand, ListThingTypesCommand } from "@aws-sdk/client-iot";
-import { S3Client, GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
-import { Readable } from 'stream';
+import {IoTClient, ListThingsCommand} from "@aws-sdk/client-iot";
+import {S3Client, GetObjectCommand, PutObjectCommand} from "@aws-sdk/client-s3";
+import {DynamoDBClient, GetItemCommand, QueryCommand} from "@aws-sdk/client-dynamodb";
+import {
+    RedshiftDataClient,
+    ExecuteStatementCommand,
+    DescribeStatementCommand,
+    GetStatementResultCommand
+} from "@aws-sdk/client-redshift-data";
+import {Readable} from 'stream';
 
 // 初始化客户端
-const iotClient = new IoTClient({ region: "us-east-1" });
-const s3Client = new S3Client({ region: "us-east-1" });
+const iotClient = new IoTClient({region: "us-east-1"});
+const s3Client = new S3Client({region: "us-east-1"});
+const dynamoClient = new DynamoDBClient({region: "us-east-1"});
+const redshiftDataClient = new RedshiftDataClient({region: "us-east-1"});
 
-// S3 存储配置
-//iotcore-logs/2025/07/24/02/pro-iotcore-logs-4-2025-07-24-02-15-29-978e2041-953e-4335-a931-e515adac9fe9.gz
+// 配置
 const S3_BUCKET = "govee-logs";
 const S3_KEY_PREFIX = "iotcore-logs/";
+const DYNAMO_COUNTER_TABLE = "IoTDeviceCounters";
+const DYNAMO_INCREMENT_TABLE = "IoTDailyIncrements";
+const REDSHIFT_CLUSTER = process.env.REDSHIFT_CLUSTER || "your-redshift-cluster";
+const REDSHIFT_DATABASE = process.env.REDSHIFT_DATABASE || "iot_analytics";
 
 /**
- * 从S3获取存储的统计数据
- * @param {string} key - S3对象键名
- * @returns {Promise<Object>} - 存储的统计数据
+ * 从S3获取昨天的统计数据
+ * @returns {Promise<Object>} - 昨天的统计数据
  */
-async function getStatisticsFromS3(key) {
+async function getYesterdayStatisticsFromS3() {
     try {
+        // 计算昨天的日期
+        const yesterday = new Date();
+        yesterday.setDate(yesterday.getDate() - 1);
+        const yesterdayStr = yesterday.toISOString().split('T')[0];
+        const year = yesterdayStr.split('-')[0];
+        const month = yesterdayStr.split('-')[1];
+
+        const key = `${year}/${month}/daily-statistic-${yesterdayStr}.json`;
+
         const command = new GetObjectCommand({
             Bucket: S3_BUCKET,
             Key: `${S3_KEY_PREFIX}${key}`
         });
-        
+
         const response = await s3Client.send(command);
-        
+
         // 读取S3对象内容
         const stream = response.Body;
         if (stream instanceof Readable) {
@@ -35,142 +55,211 @@ async function getStatisticsFromS3(key) {
             const data = Buffer.concat(chunks).toString('utf-8');
             return JSON.parse(data);
         } else {
-            // 处理非流式响应
             const data = await response.Body.transformToString();
             return JSON.parse(data);
         }
     } catch (error) {
-        // 如果对象不存在或其他错误，返回null
-        console.log(`从S3获取统计数据失败: ${error.message}`);
-        return null;
+        console.log(`从S3获取昨天统计数据失败: ${error.message}`);
+        // 返回默认值，避免程序中断
+        return {
+            accountThingCount: 0,
+            deviceThingCount: 0,
+            totalThingCount: 0
+        };
     }
 }
 
 /**
- * 将统计数据保存到S3
- * @param {string} key - S3对象键名
+ * 将今天的统计数据保存到S3
  * @param {Object} data - 要保存的数据
  */
-async function saveStatisticsToS3(key, data) {
+async function saveTodayStatisticsToS3(data) {
     try {
+        // 计算今天的日期和S3键名
+        const today = new Date().toISOString().split('T')[0];
+        const year = today.split('-')[0];
+        const month = today.split('-')[1];
+        const key = `${year}/${month}/daily-statistic-${today}.json`;
+
         const command = new PutObjectCommand({
             Bucket: S3_BUCKET,
             Key: `${S3_KEY_PREFIX}${key}`,
-            Body: JSON.stringify(data),
+            Body: JSON.stringify(data, null, 2),
             ContentType: "application/json"
         });
-        
+
         await s3Client.send(command);
-        console.log(`统计数据已保存到S3: ${key}`);
+        console.log(`今日统计数据已保存到S3: ${key}`);
     } catch (error) {
-        console.error(`保存统计数据到S3失败: ${error.message}`);
+        console.error(`保存今日统计数据到S3失败: ${error.message}`);
         throw error;
     }
 }
 
 /**
- * 获取所有IoT things的总数
- * @returns {Promise<number>} - things总数
+ * 等待Redshift查询完成
+ * @param {string} queryId - 查询ID
  */
-async function getThingsCount() {
-    let totalThings = 0;
-    let nextToken = null;
-    
+async function waitForQueryCompletion(queryId) {
+    let status = 'SUBMITTED';
+    let attempts = 0;
+    const maxAttempts = 60; // 最多等待60秒
+
+    while ((status === 'SUBMITTED' || status === 'PICKED' || status === 'STARTED') && attempts < maxAttempts) {
+        const statusCommand = new DescribeStatementCommand({
+            Id: queryId
+        });
+
+        const statusResponse = await redshiftDataClient.send(statusCommand);
+        status = statusResponse.Status;
+
+        if (status === 'FAILED') {
+            throw new Error(`Redshift查询失败: ${statusResponse.Error}`);
+        }
+
+        if (status === 'FINISHED') {
+            break;
+        }
+
+        // 等待1秒后再次检查
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        attempts++;
+    }
+
+    if (attempts >= maxAttempts) {
+        throw new Error('Redshift查询超时');
+    }
+}
+
+/**
+ * 从DynamoDB计数器获取设备总数
+ * @param {string} counterName - 计数器名称
+ * @returns {Promise<number>} - 设备总数
+ */
+// async function getDeviceCountFromDynamoDB(counterName) {
+//     try {
+//         const command = new GetItemCommand({
+//             TableName: DYNAMO_COUNTER_TABLE,
+//             Key: {
+//                 "CounterName": { S: counterName }
+//             }
+//         });
+//
+//         const response = await dynamoClient.send(command);
+//         const count = response.Item ? parseInt(response.Item.Count.N) : 0;
+//         console.log(`从DynamoDB获取${counterName}计数: ${count}`);
+//         return count;
+//     } catch (error) {
+//         console.error(`从DynamoDB获取${counterName}计数失败:`, error);
+//         return 0;
+//     }
+// }
+
+/**
+ * 从Redshift查询account表统计
+ * @returns {Promise<number>} - account表记录数
+ */
+async function getAccountCountFromRedshift() {
     try {
-        do {
-            const command = new ListThingsCommand({
-                maxResults: 250,  // 使用分页查询，每页250个
-                nextToken: nextToken
-            });
-            
-            const response = await iotClient.send(command);
-            totalThings += response.things?.length || 0;
-            nextToken = response.nextToken;
-            
-            // 添加短暂延迟以避免API限流
-            if (nextToken) {
-                await new Promise(resolve => setTimeout(resolve, 100));
-            }
-        } while (nextToken);
-        
-        return totalThings;
+        const sql = `SELECT COUNT(*) FROM device.account`;
+
+        const executeCommand = new ExecuteStatementCommand({
+            ClusterIdentifier: REDSHIFT_CLUSTER,
+            Database: REDSHIFT_DATABASE,
+            Sql: sql
+        });
+
+        console.log('执行Redshift查询: device.account表统计');
+        const executeResponse = await redshiftDataClient.send(executeCommand);
+        await waitForQueryCompletion(executeResponse.Id);
+
+        const resultsCommand = new GetStatementResultCommand({
+            Id: executeResponse.Id
+        });
+
+        const results = await redshiftDataClient.send(resultsCommand);
+
+        if (results.Records && results.Records.length > 0) {
+            const count = results.Records[0][0]?.longValue || 0;
+            console.log(`从Redshift获取account表记录数: ${count}`);
+            return count;
+        }
+
+        return 0;
     } catch (error) {
-        console.error(`获取IoT things总数失败: ${error.message}`);
-        throw error;
+        console.error('从Redshift获取account表统计失败:', error);
+        return 0;
     }
 }
 
 /**
- * 获取特定thingType的things数量
- * @param {string} thingType - 要查询的thingType名称
- * @returns {Promise<number>} - 符合条件的things数量
+ * 从Redshift查询device表统计
+ * @returns {Promise<number>} - account表记录数
  */
-async function getThingsByType(thingType) {
-    let matchingThings = 0;
-    let nextToken = null;
-    
+async function getDeviceCountFromRedshift() {
     try {
-        do {
-            const command = new ListThingsCommand({
-                maxResults: 250,
-                thingTypeName: thingType,
-                nextToken: nextToken
-            });
-            
-            const response = await iotClient.send(command);
-            matchingThings += response.things?.length || 0;
-            nextToken = response.nextToken;
-            
-            // 添加短暂延迟以避免API限流
-            if (nextToken) {
-                await new Promise(resolve => setTimeout(resolve, 100));
-            }
-        } while (nextToken);
-        
-        return matchingThings;
+        const sql = `SELECT count(*) from device.device WHERE  account_id !=0 and topic != '' and (type in ('LT_WF','BM') or sku in ('H5151', 'H5041', 'H5043', 'H5042', 'H5044','H5106','H5140'))`;
+
+        const executeCommand = new ExecuteStatementCommand({
+            ClusterIdentifier: REDSHIFT_CLUSTER,
+            Database: REDSHIFT_DATABASE,
+            Sql: sql
+        });
+
+        console.log('执行Redshift查询: device.device表统计');
+        const executeResponse = await redshiftDataClient.send(executeCommand);
+        await waitForQueryCompletion(executeResponse.Id);
+
+        const resultsCommand = new GetStatementResultCommand({
+            Id: executeResponse.Id
+        });
+
+        const results = await redshiftDataClient.send(resultsCommand);
+
+        if (results.Records && results.Records.length > 0) {
+            const count = results.Records[0][0]?.longValue || 0;
+            console.log(`从Redshift获取account表记录数: ${count}`);
+            return count;
+        }
+
+        return 0;
     } catch (error) {
-        console.error(`获取thingType为${thingType}的things数量失败: ${error.message}`);
-        throw error;
+        console.error('从Redshift获取device表统计失败:', error);
+        return 0;
     }
 }
 
-/**
- * 获取IoT统计数据
- * @returns {Promise<Object>} - IoT统计数据
- */
-async function getIoTStatistics() {
-    const today = new Date().toISOString().split('T')[0];
-    const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
-    const year = today.split('-')[0]
-    const month =today.split('-')[1]
-    // 尝试从S3获取昨天的统计数据
-    const yesterdayKey = `${year}/${month}/daily-statistic-${yesterday}.json`;
-    const yesterdayStats = await getStatisticsFromS3(yesterdayKey);
-    
-    // 获取当前的things总数
-    const totalThings = await getThingsCount();
-    
-    // 计算增量
-    const increment = yesterdayStats ? totalThings - yesterdayStats.totalThings : 0;
-    
-    // 获取特定thingType的things数量
-    const accountTypeThings = await getThingsByType('account');
-    
-    // 构建今天的统计数据
-    const todayStats = {
-        date: today,
-        totalThings: totalThings,
-        increment: increment,
-        accountTypeThings: accountTypeThings,
-        deviceTypeThings: totalThings - accountTypeThings,
-        timestamp: new Date().toISOString()
-    };
-    
-    // 保存今天的统计数据到S3
-    const todayKey = `${year}/${month}/daily-statistic-${today}.json`;
-    await saveStatisticsToS3(todayKey, todayStats);
-    
-    return todayStats;
+async function getGatewayDeviceCountFromRedshift() {
+    try {
+        const sql = `SELECT count(*) from device.gateway WHERE account_id !=0 and topic != ''`;
+
+        const executeCommand = new ExecuteStatementCommand({
+            ClusterIdentifier: REDSHIFT_CLUSTER,
+            Database: REDSHIFT_DATABASE,
+            Sql: sql
+        });
+
+        console.log('执行Redshift查询: device.device表统计');
+        const executeResponse = await redshiftDataClient.send(executeCommand);
+        await waitForQueryCompletion(executeResponse.Id);
+
+        const resultsCommand = new GetStatementResultCommand({
+            Id: executeResponse.Id
+        });
+
+        const results = await redshiftDataClient.send(resultsCommand);
+
+        if (results.Records && results.Records.length > 0) {
+            const count = results.Records[0][0]?.longValue || 0;
+            console.log(`从Redshift获取account表记录数: ${count}`);
+            return count;
+        }
+
+        return 0;
+    } catch (error) {
+        console.error('从Redshift获取device表统计失败:', error);
+        return 0;
+    }
 }
 
 /**
@@ -183,21 +272,31 @@ function formatIoTStatisticsMessage(statistics) {
         timeZone: "Asia/Shanghai",
     });
 
+    const today = new Date().toISOString().split('T')[0];
+
     let markdown = `
-# AWS IoT Core 设备统计日报 - ${statistics.date}
+# AWS IoT Core 设备统计日报 - ${today}
 > 生成时间: ${now}
 
-## 设备统计
-- 设备总数: **${statistics.totalThings}**
-- 今日新增: **${statistics.increment}**
-- Account类型设备: **${statistics.accountTypeThings}**
+## 📊 总体概况
+- 设备总数: **${statistics.totalThingCount.toLocaleString()}**
+- 今日净增量: **${statistics.totalThingIncrement >= 0 ? '+' : ''}${statistics.totalThingIncrement.toLocaleString()}**
 
-`;
+## 📈 设备类型分布
+- Account类型: **${statistics.accountThingCount.toLocaleString()}** (增量: ${statistics.accountThingIncrement >= 0 ? '+' : ''}${statistics.accountThingIncrement.toLocaleString()})
+- Device类型: **${statistics.deviceThingCount.toLocaleString()}** (增量: ${statistics.deviceThingIncrement >= 0 ? '+' : ''}${statistics.deviceThingIncrement.toLocaleString()})
+
+## 📊 类型占比
+- Account类型占比: **${statistics.totalThingCount > 0 ? ((statistics.accountThingCount / statistics.totalThingCount) * 100).toFixed(2) : 0}%**
+- Device类型占比: **${statistics.totalThingCount > 0 ? ((statistics.deviceThingCount / statistics.totalThingCount) * 100).toFixed(2) : 0}%**
+
+---
+*数据来源: Redshift (device.account, device.device), S3 (历史对比)*`;
 
     const message = {
         msgtype: "markdown",
         markdown: {
-            title: `AWS IoT Core 设备统计日报 - ${statistics.date}`,
+            title: `AWS IoT Core 设备统计日报 - ${today}`,
             text: markdown,
         },
     };
@@ -205,4 +304,87 @@ function formatIoTStatisticsMessage(statistics) {
     return message;
 }
 
-export { getIoTStatistics, formatIoTStatisticsMessage };
+/**
+ * 获取AWS IoT Core统计数据的主函数
+ * @returns {Promise<Object>} - 格式化的钉钉消息和统计数据
+ */
+async function getAWSIotCoreStatistic() {
+    try {
+        console.log('开始获取AWS IoT Core统计数据...');
+
+        // 并行获取今日数据
+        const [accountThingCount, sdeviceThingCount, gatewayThingCount, yesterday] = await Promise.all([
+            getAccountCountFromRedshift(),
+            getDeviceCountFromRedshift(), // 从DynamoDB获取device计数
+            getGatewayDeviceCountFromRedshift(), // 从DynamoDB获取device计数
+            getYesterdayStatisticsFromS3()
+        ]);
+        let deviceThingCount = sdeviceThingCount + gatewayThingCount;
+        const totalThingCount = accountThingCount + deviceThingCount;
+
+        // 计算增量
+        const yesterdayAccountThingCount = yesterday.accountThingCount || 0;
+        const yesterdayDeviceThingCount = yesterday.deviceThingCount || 0;
+        const yesterdayTotalThingCount = yesterday.totalThingCount || 0;
+
+        const accountThingIncrement = accountThingCount - yesterdayAccountThingCount;
+        const deviceThingIncrement = deviceThingCount - yesterdayDeviceThingCount;
+        const totalThingIncrement = totalThingCount - yesterdayTotalThingCount;
+
+        // 构建统计消息对象
+        const statisticMessage = {
+            date: new Date().toISOString().split('T')[0],
+            timestamp: new Date().toISOString(),
+            accountThingCount: accountThingCount,
+            deviceThingCount: deviceThingCount,
+            totalThingCount: totalThingCount,
+            accountThingIncrement: accountThingIncrement,
+            deviceThingIncrement: deviceThingIncrement,
+            totalThingIncrement: totalThingIncrement,
+            yesterdayData: {
+                accountThingCount: yesterdayAccountThingCount,
+                deviceThingCount: yesterdayDeviceThingCount,
+                totalThingCount: yesterdayTotalThingCount
+            }
+        };
+
+        console.log('统计数据:', statisticMessage);
+
+
+
+        // 保存今日统计数据到S3
+        await saveTodayStatisticsToS3(statisticMessage);
+
+        console.log('AWS IoT Core统计数据获取完成');
+
+        return statisticMessage;
+
+    } catch (error) {
+        console.error('获取AWS IoT Core统计数据失败:', error);
+
+        // 返回错误消息
+        const errorMessage = {
+            msgtype: "text",
+            text: {
+                content: `AWS IoT Core统计数据获取失败: ${error.message}`
+            }
+        };
+
+        return {
+            statistics: null,
+            dingTalkMessage: errorMessage,
+            error: error.message
+        };
+    }
+}
+
+export {
+    getAWSIotCoreStatistic,
+    formatIoTStatisticsMessage,
+    getAccountCountFromRedshift,
+    getDeviceCountFromRedshift,
+    getGatewayDeviceCountFromRedshift,
+    // getDeviceCountFromDynamoDB,
+    getYesterdayStatisticsFromS3,
+    saveTodayStatisticsToS3
+};
