@@ -165,6 +165,7 @@ async function getAccountCountFromRedshift() {
 
         const executeCommand = new ExecuteStatementCommand({
             ClusterIdentifier: REDSHIFT_CLUSTER,
+            DbUser: 'awsuser', // 添加这个参数
             Database: REDSHIFT_DATABASE,
             Sql: sql
         });
@@ -202,6 +203,7 @@ async function getDeviceCountFromRedshift() {
 
         const executeCommand = new ExecuteStatementCommand({
             ClusterIdentifier: REDSHIFT_CLUSTER,
+            DbUser: 'awsuser', // 添加这个参数
             Database: REDSHIFT_DATABASE,
             Sql: sql
         });
@@ -235,6 +237,7 @@ async function getGatewayDeviceCountFromRedshift() {
 
         const executeCommand = new ExecuteStatementCommand({
             ClusterIdentifier: REDSHIFT_CLUSTER,
+            DbUser: 'awsuser', // 添加这个参数
             Database: REDSHIFT_DATABASE,
             Sql: sql
         });
