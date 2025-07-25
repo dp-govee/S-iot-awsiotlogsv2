@@ -22,6 +22,7 @@ const DYNAMO_COUNTER_TABLE = "IoTDeviceCounters";
 const DYNAMO_INCREMENT_TABLE = "IoTDailyIncrements";
 const REDSHIFT_CLUSTER = "pro-redshift-cluster-1";
 const REDSHIFT_DATABASE = "pro";
+const REDSHIFT_DATABASE_USER = "awsuser";
 
 /**
  * 从S3获取昨天的统计数据
@@ -165,7 +166,7 @@ async function getAccountCountFromRedshift() {
 
         const executeCommand = new ExecuteStatementCommand({
             ClusterIdentifier: REDSHIFT_CLUSTER,
-            DbUser: 'awsuser', // 添加这个参数
+            DbUser: REDSHIFT_DATABASE_USER, // 添加这个参数
             Database: REDSHIFT_DATABASE,
             Sql: sql
         });
@@ -203,7 +204,7 @@ async function getDeviceCountFromRedshift() {
 
         const executeCommand = new ExecuteStatementCommand({
             ClusterIdentifier: REDSHIFT_CLUSTER,
-            DbUser: 'awsuser', // 添加这个参数
+            DbUser: REDSHIFT_DATABASE_USER, // 添加这个参数
             Database: REDSHIFT_DATABASE,
             Sql: sql
         });
@@ -220,7 +221,7 @@ async function getDeviceCountFromRedshift() {
 
         if (results.Records && results.Records.length > 0) {
             const count = results.Records[0][0]?.longValue || 0;
-            console.log(`从Redshift获取account表记录数: ${count}`);
+            console.log(`从Redshift获取device表记录数: ${count}`);
             return count;
         }
 
@@ -237,12 +238,12 @@ async function getGatewayDeviceCountFromRedshift() {
 
         const executeCommand = new ExecuteStatementCommand({
             ClusterIdentifier: REDSHIFT_CLUSTER,
-            DbUser: 'awsuser', // 添加这个参数
+            DbUser: REDSHIFT_DATABASE_USER, // 添加这个参数
             Database: REDSHIFT_DATABASE,
             Sql: sql
         });
 
-        console.log('执行Redshift查询: device.device表统计');
+        console.log('执行Redshift查询: device.gateway表统计');
         const executeResponse = await redshiftDataClient.send(executeCommand);
         await waitForQueryCompletion(executeResponse.Id);
 
@@ -254,13 +255,13 @@ async function getGatewayDeviceCountFromRedshift() {
 
         if (results.Records && results.Records.length > 0) {
             const count = results.Records[0][0]?.longValue || 0;
-            console.log(`从Redshift获取account表记录数: ${count}`);
+            console.log(`从Redshift获取gateway表记录数: ${count}`);
             return count;
         }
 
         return 0;
     } catch (error) {
-        console.error('从Redshift获取device表统计失败:', error);
+        console.error('从Redshift获取gateway表统计失败:', error);
         return 0;
     }
 }
@@ -278,11 +279,11 @@ function formatIoTStatisticsMessage(statistics) {
     const today = new Date().toISOString().split('T')[0];
 
     let markdown = `
-# AWS IoT Core 设备统计日报 - ${today}
+# AWS IoT Core Thing统计日报 - ${today}
 > 生成时间: ${now}
 
 ## 📊 总体概况
-- 设备总数: **${statistics.totalThingCount.toLocaleString()}**
+- Thing总数: **${statistics.totalThingCount.toLocaleString()}**
 - 今日净增量: **${statistics.totalThingIncrement >= 0 ? '+' : ''}${statistics.totalThingIncrement.toLocaleString()}**
 
 ## 📈 设备类型分布
