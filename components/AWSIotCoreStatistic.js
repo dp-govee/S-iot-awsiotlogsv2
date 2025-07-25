@@ -20,8 +20,8 @@ const S3_BUCKET = "govee-logs";
 const S3_KEY_PREFIX = "iotcore-logs/";
 const DYNAMO_COUNTER_TABLE = "IoTDeviceCounters";
 const DYNAMO_INCREMENT_TABLE = "IoTDailyIncrements";
-const REDSHIFT_CLUSTER = process.env.REDSHIFT_CLUSTER || "your-redshift-cluster";
-const REDSHIFT_DATABASE = process.env.REDSHIFT_DATABASE || "iot_analytics";
+const REDSHIFT_CLUSTER = "pro-redshift-cluster-1";
+const REDSHIFT_DATABASE = "pro";
 
 /**
  * 从S3获取昨天的统计数据
@@ -349,7 +349,6 @@ async function getAWSIotCoreStatistic() {
         };
 
         console.log('统计数据:', statisticMessage);
-
 
 
         // 保存今日统计数据到S3

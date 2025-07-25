@@ -13,15 +13,15 @@ NC='\033[0m' # No Color
 # 函数名称
 FUNCTION_NAME="AWSIoTCoreAlarm"
 REGION="us-east-1"
-DEPLOY_PACKAGE="function-deploy.zip"
+# 生成带时间戳的部署包文件名
+TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
+DEPLOY_PACKAGE="function-deploy-${TIMESTAMP}.zip"
 
 echo -e "${YELLOW}开始部署 AWS IoT Core 告警通知 Lambda 函数...${NC}"
 
 # 清理旧的部署包
 echo -e "${YELLOW}清理旧的部署包...${NC}"
-if [ -f "$DEPLOY_PACKAGE" ]; then
-    rm "$DEPLOY_PACKAGE"
-fi
+rm -f function-deploy-*.zip
 
 # 创建部署包
 echo -e "${YELLOW}创建部署包...${NC}"
@@ -64,6 +64,7 @@ MEMORY=$(echo "$FUNCTION_INFO" | awk '{print $4}')
 TIMEOUT=$(echo "$FUNCTION_INFO" | awk '{print $5}')
 
 echo -e "${GREEN}部署成功!${NC}"
+echo -e "${GREEN}部署包: ${NC}$DEPLOY_PACKAGE"
 echo -e "${GREEN}函数名称: ${NC}$FUNCTION_NAME"
 echo -e "${GREEN}运行时: ${NC}$RUNTIME"
 echo -e "${GREEN}内存: ${NC}$MEMORY MB"
