@@ -3,6 +3,7 @@ import {sendToDingTalk} from "./components/sendDingTalk.js";
 import {parseAlarmMessage} from "./components/parseAlarmMessage.js";
 import {confirmSubscription} from "./components/confirmSnsSubscribe.js";
 import {getAWSIotCoreStatistic, formatIoTStatisticsMessage} from "./components/AWSIotCoreStatistic.js";
+import {formatIotMsgStatisticsMessage, getAWSIotMsgStatistic} from "./components/AWSIotMsgStatistic.js";
 
 export const handler = async (event) => {
     console.log('收到事件:', JSON.stringify(event, null, 2));
@@ -38,30 +39,16 @@ export const handler = async (event) => {
             console.log('收到EventBridge定时事件:', JSON.stringify(event));
 
             // 检查是否是IoT统计任务
-            if (event.detail && event.detail.type === 'iot-statistics') {
-                console.log('执行IoT设备统计任务');
-                // 1. 获取IoT统计数据
-                const iotStatistics = await getAWSIotCoreStatistic()
-                // 2. 格式化IoT统计消息
-                const dingTalkMessage = formatIoTStatisticsMessage(iotStatistics);
 
-                // 3. 发送到钉钉
-                await sendToDingTalk(dingTalkMessage);
-                console.log('成功发送IoT统计消息到钉钉');
-            }
-            // 默认执行设备错误统计任务
-            else {
-                console.log('执行设备错误统计任务');
-                // 1. 获取并统计数据
-                const statistics = await gatherStatistics();
+            console.log('执行IoT设备统计任务');
+            // 1. 获取IoT统计数据
+            const iotStatistics = await getAWSIotCoreStatistic()
+            // 2. 格式化IoT统计消息
+            const dingTalkMessage = formatIoTStatisticsMessage(iotStatistics);
 
-                // 2. 格式化消息
-                const message = await formatMessage(statistics);
-
-                // 3. 发送到钉钉
-                await sendToDingTalk(message);
-                console.log('成功发送设备错误统计消息到钉钉');
-            }
+            // 3. 发送到钉钉
+            await sendToDingTalk(dingTalkMessage);
+            console.log('成功发送IoT统计消息到钉钉');
         }
         return {
             statusCode: 200,
@@ -106,3 +93,17 @@ function isEventFromEventBridgeScheduler(event) {
         event.resources[0].includes('rule/')
     );
 }
+
+console.log(isEventFromEventBridgeScheduler({
+    "version": "0",
+    "id": "d31118fc-c040-c429-ba6a-597be83dab98",
+    "detail-type": "Scheduled Event",
+    "source": "aws.events",
+    "account": "920700710667",
+    "time": "2025-07-28T02:00:00Z",
+    "region": "us-east-1",
+    "resources": [
+        "arn:aws:events:us-east-1:920700710667:rule/pro-iotcore-logs"
+    ],
+    "detail": {}
+}))

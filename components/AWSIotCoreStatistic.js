@@ -386,10 +386,4 @@ async function getAWSIotCoreStatistic() {
 export {
     getAWSIotCoreStatistic,
     formatIoTStatisticsMessage,
-    getAccountCountFromRedshift,
-    getDeviceCountFromRedshift,
-    getGatewayDeviceCountFromRedshift,
-    // getDeviceCountFromDynamoDB,
-    getYesterdayStatisticsFromS3,
-    saveTodayStatisticsToS3
 };

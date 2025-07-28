@@ -21,6 +21,7 @@
   },
   "dependencies": {
     "@aws-sdk/client-athena": "^3.848.0",
+    "@aws-sdk/client-cloudwatch": "^3.848.0",
     "@aws-sdk/client-dynamodb": "^3.848.0",
     "@aws-sdk/client-iot": "^3.848.0",
     "@aws-sdk/client-redshift-data": "^3.848.0",
