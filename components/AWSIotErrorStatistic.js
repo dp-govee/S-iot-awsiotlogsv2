@@ -53,9 +53,13 @@ async function getErrorMetricFromCloudWatch(metricName, startTime, endTime, dime
  */
 async function getTop10DuplicateAppClients(startTime, endTime) {
     try {
-        // 确保时间范围至少为 Period 的长度
+        // 确保时间范围至少为 Period 的长度，且Period必须是60的倍数
         const timeDiffSeconds = Math.floor((endTime - startTime) / 1000);
-        const period = Math.min(86400, Math.max(3600, timeDiffSeconds)); // 最小1小时，最大24小时
+        let period = Math.min(86400, Math.max(3600, timeDiffSeconds)); // 最小1小时，最大24小时
+        
+        // 确保period是60的倍数
+        period = Math.floor(period / 60) * 60;
+        if (period < 60) period = 60; // 最小60秒
         
         const params = {
             RuleName: 'iot-duplicateclientid-account',
@@ -104,9 +108,13 @@ async function getTop10DuplicateAppClients(startTime, endTime) {
  */
 async function getTop10DuplicateDeviceClients(startTime, endTime) {
     try {
-        // 确保时间范围至少为 Period 的长度
+        // 确保时间范围至少为 Period 的长度，且Period必须是60的倍数
         const timeDiffSeconds = Math.floor((endTime - startTime) / 1000);
-        const period = Math.min(86400, Math.max(3600, timeDiffSeconds)); // 最小1小时，最大24小时
+        let period = Math.min(86400, Math.max(3600, timeDiffSeconds)); // 最小1小时，最大24小时
+        
+        // 确保period是60的倍数
+        period = Math.floor(period / 60) * 60;
+        if (period < 60) period = 60; // 最小60秒
         
         const params = {
             RuleName: 'iot-duplicateclientid-device',
@@ -156,9 +164,13 @@ async function getTop10DuplicateDeviceClients(startTime, endTime) {
  */
 async function getTop10AuthFailureAPPClients(startTime, endTime) {
     try {
-        // 确保时间范围至少为 Period 的长度
+        // 确保时间范围至少为 Period 的长度，且Period必须是60的倍数
         const timeDiffSeconds = Math.floor((endTime - startTime) / 1000);
-        const period = Math.min(86400, Math.max(3600, timeDiffSeconds)); // 最小1小时，最大24小时
+        let period = Math.min(86400, Math.max(3600, timeDiffSeconds)); // 最小1小时，最大24小时
+        
+        // 确保period是60的倍数
+        period = Math.floor(period / 60) * 60;
+        if (period < 60) period = 60; // 最小60秒
 
         const params = {
             RuleName: 'iot-authorizationfailure-app',
@@ -633,6 +645,8 @@ async function getAWSIoTErrorStatistic(date = null, includeComparison = true) {
         };
     }
 }
+
+console.log(getAWSIoTErrorStatistic())
 
 export {
     getAWSIoTErrorStatistic,
