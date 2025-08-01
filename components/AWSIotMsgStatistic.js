@@ -359,7 +359,7 @@ async function getMessageStatisticsTrend(days = 7) {
  * @param {Object} comparison - 对比数据（可选）
  * @returns {Object} - 格式化的钉钉消息
  */
-function formatIotMsgStatisticsMessage(statistics, comparison = null) {
+function formatIotMsgStatisticsMessage(statistics) {
     const now = new Date().toLocaleString("zh-CN", {
         timeZone: "Asia/Shanghai",
     });
@@ -382,20 +382,6 @@ function formatIotMsgStatisticsMessage(statistics, comparison = null) {
 - 订阅操作: **${statistics.subscriptions.subscribe.toLocaleString()}**
 - 取消订阅: **${statistics.subscriptions.unsubscribe.toLocaleString()}**
 `;
-
-    // 添加对比数据
-    if (comparison) {
-        const messageIncrement = statistics.totalMessages - comparison.totalMessages;
-        const inboundIncrement = statistics.inbound.total - comparison.inbound.total;
-        const outboundIncrement = statistics.outbound.total - comparison.outbound.total;
-        
-        markdown += `
-## 📈 日环比变化
-- 消息总数变化: **${messageIncrement >= 0 ? '+' : ''}${messageIncrement.toLocaleString()}**
-- 入站消息变化: **${inboundIncrement >= 0 ? '+' : ''}${inboundIncrement.toLocaleString()}**
-- 出站消息变化: **${outboundIncrement >= 0 ? '+' : ''}${outboundIncrement.toLocaleString()}**
-`;
-    }
 
     markdown += `\n---\n*数据来源: CloudWatch Metrics*`;
 
@@ -422,24 +408,18 @@ async function getAWSIotMsgStatistic(date = null) {
         const todayStats = await getDailyMessageStatistics(targetDate);
         
         // 获取昨天数据用于对比
-        const yesterday = new Date(targetDate);
-        yesterday.setDate(yesterday.getDate() - 1);
-        const yesterdayStr = yesterday.toISOString().split('T')[0];
-        const yesterdayStats = await getMessageStatisticsFromS3(yesterdayStr);
+        // const yesterday = new Date(targetDate);
+        // yesterday.setDate(yesterday.getDate() - 1);
+        // const yesterdayStr = yesterday.toISOString().split('T')[0];
+        // const yesterdayStats = await getMessageStatisticsFromS3(yesterdayStr);
         
         // 保存今日统计数据到S3
         await saveMessageStatisticsToS3(todayStats);
-        
-        // 格式化钉钉消息
-        const dingTalkMessage = formatMessageStatisticsMessage(todayStats, yesterdayStats);
+
+        return todayStats;
+
         
         console.log('AWS IoT消息统计数据获取完成');
-        
-        return {
-            statistics: todayStats,
-            dingTalkMessage: dingTalkMessage,
-            comparison: yesterdayStats
-        };
         
     } catch (error) {
         console.error('获取AWS IoT消息统计数据失败:', error);

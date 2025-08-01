@@ -4,6 +4,7 @@ import {parseAlarmMessage} from "./components/parseAlarmMessage.js";
 import {confirmSubscription} from "./components/confirmSnsSubscribe.js";
 import {getAWSIotCoreStatistic, formatIoTStatisticsMessage} from "./components/AWSIotCoreStatistic.js";
 import {formatIotMsgStatisticsMessage, getAWSIotMsgStatistic} from "./components/AWSIotMsgStatistic.js";
+import {getAWSIoTErrorStatistic, formatIoTErrorStatisticsMessage} from "./components/AWSIotErrorStatistic.js";
 
 export const handler = async (event) => {
     console.log('收到事件:', JSON.stringify(event, null, 2));
@@ -43,11 +44,30 @@ export const handler = async (event) => {
             console.log('执行IoT设备统计任务');
             // 1. 获取IoT统计数据
             const iotStatistics = await getAWSIotCoreStatistic()
+
             // 2. 格式化IoT统计消息
             const dingTalkMessage = formatIoTStatisticsMessage(iotStatistics);
 
             // 3. 发送到钉钉
             await sendToDingTalk(dingTalkMessage);
+
+            console.log('执行IoT消息统计任务');
+            //2.获取Iot消息统计数据
+            const iotMsgStatistics = await getAWSIotMsgStatistic();
+            // 格式化钉钉消息
+            const dingTalkIotMsg =formatIotMsgStatisticsMessage(iotMsgStatistics);
+            // 3. 发送到钉钉
+            await sendToDingTalk(dingTalkIotMsg);
+
+
+            console.log('执行IoT错误消息统计任务');
+            //2.获取Iot消息统计数据
+            const iotErrorMsgStatistics = await getAWSIoTErrorStatistic();
+            // 格式化钉钉消息
+            const dingTalkIotErrorMsg =formatIoTErrorStatisticsMessage(iotErrorMsgStatistics);
+            // 3. 发送到钉钉
+            await sendToDingTalk(dingTalkIotErrorMsg);
+
             console.log('成功发送IoT统计消息到钉钉');
         }
         return {
