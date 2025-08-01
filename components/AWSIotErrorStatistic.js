@@ -53,11 +53,15 @@ async function getErrorMetricFromCloudWatch(metricName, startTime, endTime, dime
  */
 async function getTop10DuplicateAppClients(startTime, endTime) {
     try {
+        // 确保时间范围至少为 Period 的长度
+        const timeDiffSeconds = Math.floor((endTime - startTime) / 1000);
+        const period = Math.min(86400, Math.max(3600, timeDiffSeconds)); // 最小1小时，最大24小时
+        
         const params = {
             RuleName: 'iot-duplicateclientid-account',
             StartTime: startTime,
             EndTime: endTime,
-            Period: 86400,
+            Period: period,
             MaxContributorCount: 10
         };
 
@@ -100,11 +104,15 @@ async function getTop10DuplicateAppClients(startTime, endTime) {
  */
 async function getTop10DuplicateDeviceClients(startTime, endTime) {
     try {
+        // 确保时间范围至少为 Period 的长度
+        const timeDiffSeconds = Math.floor((endTime - startTime) / 1000);
+        const period = Math.min(86400, Math.max(3600, timeDiffSeconds)); // 最小1小时，最大24小时
+        
         const params = {
             RuleName: 'iot-duplicateclientid-device',
             StartTime: startTime,
             EndTime: endTime,
-            Period: 86400,
+            Period: period,
             MaxContributorCount: 10
         };
 
@@ -139,6 +147,58 @@ async function getTop10DuplicateDeviceClients(startTime, endTime) {
     }
 }
 
+
+/**
+ * 获取Top 10授权失败客户端ID（应用类型）
+ * @param {Date} startTime - 开始时间
+ * @param {Date} endTime - 结束时间
+ * @returns {Promise<Object>} - 授权失败客户端统计
+ */
+async function getTop10AuthFailureAPPClients(startTime, endTime) {
+    try {
+        // 确保时间范围至少为 Period 的长度
+        const timeDiffSeconds = Math.floor((endTime - startTime) / 1000);
+        const period = Math.min(86400, Math.max(3600, timeDiffSeconds)); // 最小1小时，最大24小时
+
+        const params = {
+            RuleName: 'iot-authorizationfailure-app',
+            StartTime: startTime,
+            EndTime: endTime,
+            Period: period,
+            MaxContributorCount: 10
+        };
+
+        const response = await cloudwatchClient.send(new GetInsightRuleReportCommand(params));
+
+        console.log(`应用授权失败 - 总事件数: ${response.AggregateValue}`);
+        console.log(`应用授权失败 - 唯一客户端数: ${response.ApproximateUniqueCount}`);
+
+        const authFailureClients = response.Contributors?.map((contributor, index) => ({
+            rank: index + 1,
+            clientId: contributor.Keys[0],
+            sourceIp: contributor.Keys[1] || 'Unknown',
+            duplicateCount: contributor.ApproximateAggregateValue,
+            percentage: ((contributor.ApproximateAggregateValue / response.AggregateValue) * 100).toFixed(2)
+        })) || [];
+
+        return {
+            totalEvents: response.AggregateValue || 0,
+            uniqueClients: response.ApproximateUniqueCount || 0,
+            authFailureClients: authFailureClients,
+            type: 'application'
+        };
+    } catch (error) {
+        console.error('获取应用授权失败客户端失败:', error);
+        return {
+            totalEvents: 0,
+            uniqueClients: 0,
+            authFailureClients: [],
+            type: 'application',
+            error: error.message
+        };
+    }
+}
+
 /**
  * 获取每日IoT错误统计
  * @param {string} date - 日期 (YYYY-MM-DD)
@@ -147,111 +207,27 @@ async function getTop10DuplicateDeviceClients(startTime, endTime) {
 async function getDailyIoTErrorStatistics(date) {
     const startTime = new Date(date);
     startTime.setHours(0, 0, 0, 0);
-    
+
     const endTime = new Date(date);
     endTime.setHours(23, 59, 59, 999);
-    
-    console.log(`开始获取 ${date} 的IoT错误统计...`);
-    
-    // 并行查询多个错误指标
-    const errorMetrics = [
-        { name: 'Connect.AuthError', label: '认证错误' },
-        { name: 'Connect.ClientError', label: '连接客户端错误' },
-        { name: 'Connect.ServerError', label: '连接服务器错误' },
-        { name: 'Connect.Throttle', label: '连接限流' },
-        { name: 'PublishIn.AuthError', label: '入站认证错误' },
-        { name: 'PublishIn.ClientError', label: '入站客户端错误' },
-        { name: 'PublishIn.ServerError', label: '入站服务器错误' },
-        { name: 'PublishOut.AuthError', label: '出站认证错误' },
-        { name: 'PublishOut.ClientError', label: '出站客户端错误' },
-        { name: 'PublishOut.ServerError', label: '出站服务器错误' },
-        { name: 'Subscribe.AuthError', label: '订阅认证错误' },
-        { name: 'Subscribe.ClientError', label: '订阅客户端错误' },
-        { name: 'Subscribe.ServerError', label: '订阅服务器错误' },
-        { name: 'Subscribe.Throttle', label: '订阅限流' }
-    ];
-    
+
     // 并行查询错误指标和重复客户端
-    const [errorResults, duplicateAppClients, duplicateDeviceClients] = await Promise.all([
-        Promise.all(
-            errorMetrics.map(async (metric) => {
-                try {
-                    const value = await getErrorMetricFromCloudWatch(metric.name, startTime, endTime);
-                    return {
-                        metric: metric.name,
-                        label: metric.label,
-                        value: value
-                    };
-                } catch (error) {
-                    console.error(`查询错误指标 ${metric.name} 失败:`, error);
-                    return {
-                        metric: metric.name,
-                        label: metric.label,
-                        value: 0
-                    };
-                }
-            })
-        ),
+    const [ duplicateAppClients, duplicateDeviceClients, authFailureAppClients] = await Promise.all([
         getTop10DuplicateAppClients(startTime, endTime),
-        getTop10DuplicateDeviceClients(startTime, endTime)
+        getTop10DuplicateDeviceClients(startTime, endTime),
+        getTop10AuthFailureAPPClients(startTime,endTime)
     ]);
-    
+
     // 整理错误统计结果
     const statistics = {
         date: date,
         timestamp: new Date().toISOString(),
-        connectionErrors: {
-            authError: errorResults.find(r => r.metric === 'Connect.AuthError')?.value || 0,
-            clientError: errorResults.find(r => r.metric === 'Connect.ClientError')?.value || 0,
-            serverError: errorResults.find(r => r.metric === 'Connect.ServerError')?.value || 0,
-            throttle: errorResults.find(r => r.metric === 'Connect.Throttle')?.value || 0
-        },
-        publishInErrors: {
-            authError: errorResults.find(r => r.metric === 'PublishIn.AuthError')?.value || 0,
-            clientError: errorResults.find(r => r.metric === 'PublishIn.ClientError')?.value || 0,
-            serverError: errorResults.find(r => r.metric === 'PublishIn.ServerError')?.value || 0
-        },
-        publishOutErrors: {
-            authError: errorResults.find(r => r.metric === 'PublishOut.AuthError')?.value || 0,
-            clientError: errorResults.find(r => r.metric === 'PublishOut.ClientError')?.value || 0,
-            serverError: errorResults.find(r => r.metric === 'PublishOut.ServerError')?.value || 0
-        },
-        subscribeErrors: {
-            authError: errorResults.find(r => r.metric === 'Subscribe.AuthError')?.value || 0,
-            clientError: errorResults.find(r => r.metric === 'Subscribe.ClientError')?.value || 0,
-            serverError: errorResults.find(r => r.metric === 'Subscribe.ServerError')?.value || 0,
-            throttle: errorResults.find(r => r.metric === 'Subscribe.Throttle')?.value || 0
-        },
-        duplicateClients: {
-            applications: duplicateAppClients,
-            devices: duplicateDeviceClients
-        }
+        duplicateAppClients: duplicateAppClients,
+        duplicateDeviceClients: duplicateDeviceClients,
+        authFailureAppClients:authFailureAppClients
     };
-    
-    // 计算总计
-    statistics.connectionErrors.total = Object.values(statistics.connectionErrors).reduce((sum, val) => 
-        typeof val === 'number' ? sum + val : sum, 0);
-    statistics.publishInErrors.total = Object.values(statistics.publishInErrors).reduce((sum, val) => 
-        typeof val === 'number' ? sum + val : sum, 0);
-    statistics.publishOutErrors.total = Object.values(statistics.publishOutErrors).reduce((sum, val) => 
-        typeof val === 'number' ? sum + val : sum, 0);
-    statistics.subscribeErrors.total = Object.values(statistics.subscribeErrors).reduce((sum, val) => 
-        typeof val === 'number' ? sum + val : sum, 0);
-    
-    statistics.totalErrors = statistics.connectionErrors.total + 
-                           statistics.publishInErrors.total + 
-                           statistics.publishOutErrors.total + 
-                           statistics.subscribeErrors.total;
-    
-    console.log(`${date} IoT错误统计完成:`, {
-        totalErrors: statistics.totalErrors,
-        connectionErrors: statistics.connectionErrors.total,
-        publishErrors: statistics.publishInErrors.total + statistics.publishOutErrors.total,
-        subscribeErrors: statistics.subscribeErrors.total,
-        duplicateAppClients: statistics.duplicateClients.applications.totalEvents,
-        duplicateDeviceClients: statistics.duplicateClients.devices.totalEvents
-    });
-    
+
+
     return statistics;
 }
 
@@ -334,72 +310,234 @@ async function getErrorStatisticsFromS3(date) {
  * @param {Object} comparison - 对比数据（可选）
  * @returns {Object} - 格式化的钉钉消息
  */
-function formatIoTErrorStatisticsMessage(statistics ) {
+function formatIoTErrorStatisticsMessage(statistics, comparison = null) {
+    // 数据验证
+    if (!statistics || !statistics.date) {
+        return {
+            msgtype: "text",
+            text: {
+                content: "❌ 错误：统计数据格式不正确或缺少日期信息"
+            }
+        };
+    }
+
     const now = new Date().toLocaleString("zh-CN", {
         timeZone: "Asia/Shanghai",
     });
 
-    let markdown = `
-# AWS IoT Core 错误统计日报 - ${statistics.date}
-> 生成时间: ${now}
+    let markdown = `# 📊 AWS IoT Core 错误统计日报
+## ${statistics.date}
+> 🕐 生成时间: ${now}
 
-## 🚨 错误总览
-- 错误总数: **${statistics.totalErrors.toLocaleString()}**
-- 连接错误: **${statistics.connectionErrors.total.toLocaleString()}**
-- 发布错误: **${(statistics.publishInErrors.total + statistics.publishOutErrors.total).toLocaleString()}**
-- 订阅错误: **${statistics.subscribeErrors.total.toLocaleString()}**
-
-## 🔌 连接错误详情
-- 认证错误: **${statistics.connectionErrors.authError.toLocaleString()}**
-- 客户端错误: **${statistics.connectionErrors.clientError.toLocaleString()}**
-- 服务器错误: **${statistics.connectionErrors.serverError.toLocaleString()}**
-- 限流错误: **${statistics.connectionErrors.throttle.toLocaleString()}**
-
-## 📤 发布错误详情
-**入站消息错误:**
-- 认证错误: **${statistics.publishInErrors.authError.toLocaleString()}**
-- 客户端错误: **${statistics.publishInErrors.clientError.toLocaleString()}**
-- 服务器错误: **${statistics.publishInErrors.serverError.toLocaleString()}**
-
-**出站消息错误:**
-- 认证错误: **${statistics.publishOutErrors.authError.toLocaleString()}**
-- 客户端错误: **${statistics.publishOutErrors.clientError.toLocaleString()}**
-- 服务器错误: **${statistics.publishOutErrors.serverError.toLocaleString()}**
-
-## 📋 订阅错误详情
-- 认证错误: **${statistics.subscribeErrors.authError.toLocaleString()}**
-- 客户端错误: **${statistics.subscribeErrors.clientError.toLocaleString()}**
-- 服务器错误: **${statistics.subscribeErrors.serverError.toLocaleString()}**
-- 限流错误: **${statistics.subscribeErrors.throttle.toLocaleString()}**
 `;
 
-    // 添加重复客户端信息
-    if (statistics.duplicateClients.applications.totalEvents > 0 || 
-        statistics.duplicateClients.devices.totalEvents > 0) {
-        markdown += `
-## 🔄 重复客户端ID统计
-**应用类型重复:** ${statistics.duplicateClients.applications.totalEvents.toLocaleString()} 次
-**设备类型重复:** ${statistics.duplicateClients.devices.totalEvents.toLocaleString()} 次
+    // 计算总体统计
+    const totalDuplicateApp = statistics.duplicateAppClients?.totalEvents || 0;
+    const totalDuplicateDevice = statistics.duplicateDeviceClients?.totalEvents || 0;
+    const totalAuthFailure = statistics.authFailureAppClients?.totalEvents || 0;
+    const totalErrors = totalDuplicateApp + totalDuplicateDevice + totalAuthFailure;
+
+    // 总览部分
+    markdown += `## 📈 总览统计
+| 错误类型 | 事件数量 | 占比 |
+|---------|---------|------|
+| 🔄 应用重复客户端 | ${totalDuplicateApp.toLocaleString()} | ${totalErrors > 0 ? ((totalDuplicateApp / totalErrors) * 100).toFixed(1) : '0'}% |
+| 🔄 设备重复客户端 | ${totalDuplicateDevice.toLocaleString()} | ${totalErrors > 0 ? ((totalDuplicateDevice / totalErrors) * 100).toFixed(1) : '0'}% |
+| 🚫 授权失败 | ${totalAuthFailure.toLocaleString()} | ${totalErrors > 0 ? ((totalAuthFailure / totalErrors) * 100).toFixed(1) : '0'}% |
+| **总计** | **${totalErrors.toLocaleString()}** | **100%** |
+
+`;
+
+    // 重复客户端ID统计 - 应用类型
+    if (statistics.duplicateAppClients) {
+        const appStats = statistics.duplicateAppClients;
+        markdown += `## 🔄 重复客户端ID - 应用类型 (AP/)
+**📊 统计概览:**
+- 总事件数: **${(appStats.totalEvents || 0).toLocaleString()}** 次
+- 唯一客户端: **${(appStats.uniqueClients || 0).toLocaleString()}** 个
+- 平均每客户端: **${appStats.uniqueClients > 0 ? Math.round(appStats.totalEvents / appStats.uniqueClients) : 0}** 次
+
 `;
 
         // Top 5 重复应用客户端
-        if (statistics.duplicateClients.applications.duplicateClients.length > 0) {
-            markdown += `\n**Top 5 重复应用客户端:**\n`;
-            statistics.duplicateClients.applications.duplicateClients.slice(0, 5).forEach(client => {
-                markdown += `- ${client.clientId}: **${client.duplicateCount}** 次 (${client.percentage}%)\n`;
+        if (appStats.duplicateClients && appStats.duplicateClients.length > 0) {
+            markdown += `**🏆 Top 5 重复应用客户端:**
+`;
+            appStats.duplicateClients.slice(0, 5).forEach((client, index) => {
+                const clientIdShort = client.clientId.length > 50 ? 
+                    client.clientId.substring(0, 47) + '...' : client.clientId;
+                markdown += `${index + 1}. \`${clientIdShort}\`
+   - 📍 IP: ${client.sourceIp}
+   - 🔢 重复: **${client.duplicateCount.toLocaleString()}** 次 (${client.percentage}%)
+`;
             });
+        } else {
+            markdown += `✅ **无重复应用客户端记录**
+`;
         }
 
-        // Top 5 重复设备客户端
-        if (statistics.duplicateClients.devices.duplicateClients.length > 0) {
-            markdown += `\n**Top 5 重复设备客户端:**\n`;
-            statistics.duplicateClients.devices.duplicateClients.slice(0, 5).forEach(client => {
-                markdown += `- ${client.clientId}: **${client.duplicateCount}** 次 (${client.percentage}%)\n`;
-            });
+        if (appStats.error) {
+            markdown += `⚠️ *数据获取异常: ${appStats.error}*
+`;
         }
     }
 
-    markdown += `\n---\n*数据来源: CloudWatch Metrics & Insights*`;
+    // 重复客户端ID统计 - 设备类型
+    if (statistics.duplicateDeviceClients) {
+        const deviceStats = statistics.duplicateDeviceClients;
+        markdown += `
+## 🔄 重复客户端ID - 设备类型 (GD/)
+**📊 统计概览:**
+- 总事件数: **${(deviceStats.totalEvents || 0).toLocaleString()}** 次
+- 唯一客户端: **${(deviceStats.uniqueClients || 0).toLocaleString()}** 个
+- 平均每客户端: **${deviceStats.uniqueClients > 0 ? Math.round(deviceStats.totalEvents / deviceStats.uniqueClients) : 0}** 次
+
+`;
+
+        // Top 5 重复设备客户端
+        if (deviceStats.duplicateClients && deviceStats.duplicateClients.length > 0) {
+            markdown += `**🏆 Top 5 重复设备客户端:**
+`;
+            deviceStats.duplicateClients.slice(0, 5).forEach((client, index) => {
+                const clientIdShort = client.clientId.length > 50 ? 
+                    client.clientId.substring(0, 47) + '...' : client.clientId;
+                markdown += `${index + 1}. \`${clientIdShort}\`
+   - 📍 IP: ${client.sourceIp}
+   - 🔢 重复: **${client.duplicateCount.toLocaleString()}** 次 (${client.percentage}%)
+`;
+            });
+        } else {
+            markdown += `✅ **无重复设备客户端记录**
+`;
+        }
+
+        if (deviceStats.error) {
+            markdown += `⚠️ *数据获取异常: ${deviceStats.error}*
+`;
+        }
+    }
+
+    // 授权失败统计 - 应用类型
+    if (statistics.authFailureAppClients) {
+        const authStats = statistics.authFailureAppClients;
+        markdown += `
+## 🚫 授权失败统计 - 应用类型
+**📊 统计概览:**
+- 总失败数: **${(authStats.totalEvents || 0).toLocaleString()}** 次
+- 唯一客户端: **${(authStats.uniqueClients || 0).toLocaleString()}** 个
+- 平均每客户端: **${authStats.uniqueClients > 0 ? Math.round(authStats.totalEvents / authStats.uniqueClients) : 0}** 次
+
+`;
+
+        // Top 5 授权失败应用客户端
+        if (authStats.authFailureAppClients && authStats.authFailureAppClients.length > 0) {
+            markdown += `**🏆 Top 5 授权失败客户端:**
+`;
+            authStats.authFailureAppClients.slice(0, 5).forEach((client, index) => {
+                const clientIdShort = client.clientId.length > 50 ? 
+                    client.clientId.substring(0, 47) + '...' : client.clientId;
+                markdown += `${index + 1}. \`${clientIdShort}\`
+   - 📍 IP: ${client.sourceIp}
+   - ❌ 失败: **${client.duplicateCount.toLocaleString()}** 次 (${client.percentage}%)
+`;
+            });
+        } else {
+            markdown += `✅ **无授权失败记录**
+`;
+        }
+
+        if (authStats.error) {
+            markdown += `⚠️ *数据获取异常: ${authStats.error}*
+`;
+        }
+    }
+
+    // 添加对比数据（如果提供）
+    if (comparison) {
+        markdown += `
+## 📊 日环比分析
+`;
+        
+        const comparisons = [
+            {
+                name: '应用重复客户端',
+                today: totalDuplicateApp,
+                yesterday: comparison.duplicateAppClients?.totalEvents || 0,
+                icon: '🔄'
+            },
+            {
+                name: '设备重复客户端',
+                today: totalDuplicateDevice,
+                yesterday: comparison.duplicateDeviceClients?.totalEvents || 0,
+                icon: '🔄'
+            },
+            {
+                name: '授权失败',
+                today: totalAuthFailure,
+                yesterday: comparison.authFailureAppClients?.totalEvents || 0,
+                icon: '🚫'
+            }
+        ];
+
+        comparisons.forEach(item => {
+            const change = item.today - item.yesterday;
+            const changePercent = item.yesterday > 0 ? ((change / item.yesterday) * 100).toFixed(1) : 'N/A';
+            
+            let trend = '';
+            if (change > 0) {
+                trend = `📈 +${change.toLocaleString()} (+${changePercent}%)`;
+            } else if (change < 0) {
+                trend = `📉 ${change.toLocaleString()} (${changePercent}%)`;
+            } else {
+                trend = `➡️ 无变化`;
+            }
+            
+            markdown += `${item.icon} **${item.name}:** ${item.today.toLocaleString()} 次 ${trend}
+`;
+        });
+    }
+
+    // 智能分析和建议
+    markdown += `
+## 🔍 智能分析与建议
+`;
+
+    if (totalErrors === 0) {
+        markdown += `✅ **系统状态良好**
+- 今日无错误事件记录
+- 所有IoT客户端连接正常
+- 建议继续保持当前配置
+
+`;
+    } else {
+        // 错误严重程度分析
+        let severity = '正常';
+        let severityIcon = '✅';
+        
+        if (totalErrors > 50000) {
+            severity = '严重';
+            severityIcon = '🔴';
+        } else if (totalErrors > 10000) {
+            severity = '警告';
+            severityIcon = '🟡';
+        } else if (totalErrors > 1000) {
+            severity = '注意';
+            severityIcon = '🟠';
+        }
+
+        markdown += `${severityIcon} **错误严重程度:** ${severity}
+
+`;
+    }
+
+    // 数据源信息
+    markdown += `
+---
+📋 **报告信息**
+- 数据来源: AWS CloudWatch Contributor Insights
+- 监控规则: iot-duplicateclientid-account, iot-duplicateclientid-device, iot-authorizationfailure-app
+- 日志组: AWSIotLogsV2
+- 生成系统: AWS IoT Core 监控系统`;
 
     return {
         msgtype: "markdown",
@@ -413,9 +551,10 @@ function formatIoTErrorStatisticsMessage(statistics ) {
 /**
  * 获取AWS IoT错误统计的主函数
  * @param {string} date - 日期 (YYYY-MM-DD)，默认为今天
+ * @param {boolean} includeComparison - 是否包含对比数据，默认为true
  * @returns {Promise<Object>} - 错误统计数据和钉钉消息
  */
-async function getAWSIoTErrorStatistic(date = null) {
+async function getAWSIoTErrorStatistic(date = null, includeComparison = true) {
     try {
         const targetDate = date || new Date().toISOString().split('T')[0];
         console.log(`开始获取AWS IoT错误统计数据: ${targetDate}`);
@@ -426,12 +565,41 @@ async function getAWSIoTErrorStatistic(date = null) {
         // 保存今日统计数据到S3
         await saveErrorStatisticsToS3(todayStats);
 
-        // 格式化钉钉消息
-        // const dingTalkMessage = formatIoTErrorStatisticsMessage(todayStats);
-        console.log('AWS IoT错误统计数据获取完成');
-        return targetDate;
-
+        let comparison = null;
         
+        // 获取昨日数据用于对比（如果需要）
+        if (includeComparison) {
+            try {
+                const yesterday = new Date(targetDate);
+                yesterday.setDate(yesterday.getDate() - 1);
+                const yesterdayDate = yesterday.toISOString().split('T')[0];
+                
+                console.log(`获取对比数据: ${yesterdayDate}`);
+                comparison = await getErrorStatisticsFromS3(yesterdayDate);
+                
+                // 如果S3中没有昨日数据，尝试实时获取
+                if (!comparison || (!comparison.duplicateAppClients && !comparison.duplicateDeviceClients && !comparison.authFailureAppClients)) {
+                    console.log(`S3中无昨日数据，尝试实时获取: ${yesterdayDate}`);
+                    comparison = await getDailyIoTErrorStatistics(yesterdayDate);
+                }
+            } catch (error) {
+                console.log(`获取昨日对比数据失败: ${error.message}`);
+                // 继续执行，不影响主要功能
+            }
+        }
+
+        // 格式化钉钉消息
+        const dingTalkMessage = formatIoTErrorStatisticsMessage(todayStats, comparison);
+        
+        console.log('AWS IoT错误统计数据获取完成');
+        
+        return {
+            date: targetDate,
+            statistics: todayStats,
+            comparison: comparison,
+            dingTalkMessage: dingTalkMessage,
+            success: true
+        };
 
     } catch (error) {
         console.error('获取AWS IoT错误统计数据失败:', error);
@@ -439,13 +607,28 @@ async function getAWSIoTErrorStatistic(date = null) {
         const errorMessage = {
             msgtype: "text",
             text: {
-                content: `AWS IoT错误统计数据获取失败: ${error.message}`
+                content: `❌ AWS IoT错误统计数据获取失败
+
+**错误信息:** ${error.message}
+**时间:** ${new Date().toLocaleString("zh-CN", { timeZone: "Asia/Shanghai" })}
+**日期:** ${date || '今日'}
+
+请检查以下项目：
+- CloudWatch权限配置
+- 网络连接状态
+- Contributor Insights规则状态
+- 日志组访问权限
+
+如问题持续，请联系系统管理员。`
             }
         };
         
         return {
+            date: date || new Date().toISOString().split('T')[0],
             statistics: null,
+            comparison: null,
             dingTalkMessage: errorMessage,
+            success: false,
             error: error.message
         };
     }
@@ -456,5 +639,6 @@ export {
     formatIoTErrorStatisticsMessage,
     getTop10DuplicateAppClients,
     getTop10DuplicateDeviceClients,
-    getDailyIoTErrorStatistics
+    getDailyIoTErrorStatistics,
+    getTop10AuthFailureAPPClients
 };
