@@ -63,6 +63,7 @@ export const handler = async (event) => {
             console.log('执行IoT错误消息统计任务');
             //2.获取Iot消息统计数据
             const iotErrorMsgStatistics = await getAWSIoTErrorStatistic();
+
             // 格式化钉钉消息
             const dingTalkIotErrorMsg =formatIoTErrorStatisticsMessage(iotErrorMsgStatistics);
             // 3. 发送到钉钉

@@ -322,7 +322,7 @@ async function getErrorStatisticsFromS3(date) {
  * @param {Object} comparison - 对比数据（可选）
  * @returns {Object} - 格式化的钉钉消息
  */
-function formatIoTErrorStatisticsMessage(statistics, comparison = null) {
+function formatIoTErrorStatisticsMessage({statistics, comparison}) {
     // 数据验证
     if (!statistics || !statistics.date) {
         return {
@@ -572,10 +572,10 @@ async function getAWSIoTErrorStatistic(date = null, includeComparison = true) {
         console.log(`开始获取AWS IoT错误统计数据: ${targetDate}`);
         
         // 获取今日错误统计
-        const todayStats = await getDailyIoTErrorStatistics(targetDate);
+        const statistics = await getDailyIoTErrorStatistics(targetDate);
         
         // 保存今日统计数据到S3
-        await saveErrorStatisticsToS3(todayStats);
+        await saveErrorStatisticsToS3(statistics);
 
         let comparison = null;
         
@@ -600,18 +600,11 @@ async function getAWSIoTErrorStatistic(date = null, includeComparison = true) {
             }
         }
 
-        // 格式化钉钉消息
-        const dingTalkMessage = formatIoTErrorStatisticsMessage(todayStats, comparison);
+        return {statistics,comparison};
+
         
         console.log('AWS IoT错误统计数据获取完成');
-        
-        return {
-            date: targetDate,
-            statistics: todayStats,
-            comparison: comparison,
-            dingTalkMessage: dingTalkMessage,
-            success: true
-        };
+
 
     } catch (error) {
         console.error('获取AWS IoT错误统计数据失败:', error);
@@ -646,7 +639,7 @@ async function getAWSIoTErrorStatistic(date = null, includeComparison = true) {
     }
 }
 
-// console.log(getAWSIoTErrorStatistic())
+// console.log(formatIoTErrorStatisticsMessage(await getAWSIoTErrorStatistic()))
 
 export {
     getAWSIoTErrorStatistic,
