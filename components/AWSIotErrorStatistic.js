@@ -646,7 +646,7 @@ async function getAWSIoTErrorStatistic(date = null, includeComparison = true) {
     }
 }
 
-console.log(getAWSIoTErrorStatistic())
+// console.log(getAWSIoTErrorStatistic())
 
 export {
     getAWSIoTErrorStatistic,
